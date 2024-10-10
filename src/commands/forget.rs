@@ -1,16 +1,14 @@
 //! `forget` subcommand
 
-use crate::{
-    commands::open_repository, helpers::table_with_titles, status_err, Application, RusticConfig,
-    RUSTIC_APP,
-};
+use crate::repository::CliOpenRepo;
+use crate::{helpers::table_with_titles, status_err, Application, RusticConfig, RUSTIC_APP};
 
 use abscissa_core::{config::Override, Shutdown};
 use abscissa_core::{Command, FrameworkError, Runnable};
 use anyhow::Result;
 
 use chrono::Local;
-use merge::Merge;
+use conflate::Merge;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 
@@ -70,11 +68,12 @@ pub struct ForgetOptions {
     /// Group snapshots by any combination of host,label,paths,tags (default: "host,label,paths")
     #[clap(long, short = 'g', value_name = "CRITERION")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[merge(strategy=conflate::option::overwrite_none)]
     group_by: Option<SnapshotGroupCriterion>,
 
     /// Also prune the repository
     #[clap(long)]
-    #[merge(strategy = merge::bool::overwrite_false)]
+    #[merge(strategy=conflate::bool::overwrite_false)]
     prune: bool,
 
     /// Snapshot filter options
@@ -90,7 +89,11 @@ pub struct ForgetOptions {
 
 impl Runnable for ForgetCmd {
     fn run(&self) {
-        if let Err(err) = self.inner_run() {
+        if let Err(err) = RUSTIC_APP
+            .config()
+            .repository
+            .run_open(|repo| self.inner_run(repo))
+        {
             status_err!("{}", err);
             RUSTIC_APP.shutdown(Shutdown::Crash);
         };
@@ -101,9 +104,8 @@ impl ForgetCmd {
     /// be careful about self vs `RUSTIC_APP.config()` usage
     /// only the `RUSTIC_APP.config()` involves the TOML and ENV merged configurations
     /// see <https://github.com/rustic-rs/rustic/issues/1242>
-    fn inner_run(&self) -> Result<()> {
+    fn inner_run(&self, repo: CliOpenRepo) -> Result<()> {
         let config = RUSTIC_APP.config();
-        let repo = open_repository(&config.repository)?;
 
         let group_by = config.forget.group_by.unwrap_or_default();
 
